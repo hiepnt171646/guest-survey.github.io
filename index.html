@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Khảo sát tính cách</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin:0; padding:0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:white; }
+    .container { max-width: 800px; margin:0 auto; padding:20px; }
+    .question-card { background:white; color:#333; border-radius:20px; padding:25px; margin-bottom:20px; }
+    .options button { padding:10px 15px; margin:5px; border-radius:10px; border:1px solid #ccc; cursor:pointer; background:#f8f9fa; }
+    .options button.selected { border:2px solid #667eea; background:#f0f4ff; color:#667eea; }
+    #submitBtn { padding:15px 40px; font-weight:bold; border:none; border-radius:50px; cursor:pointer; background:linear-gradient(135deg, #43e97b, #38f9d7); color:white; }
+    #resultCard { background:white; color:#333; border-radius:25px; padding:30px; margin-top:20px; display:none; text-align:center; }
+    #progressBar { width:100%; height:10px; background:rgba(255,255,255,0.3); border-radius:10px; overflow:hidden; margin-bottom:10px; }
+    #progressFill { height:100%; width:0%; background: linear-gradient(90deg, #43e97b, #38f9d7); transition: width 0.3s; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 style="text-align:center;">🧠 Khảo sát tính cách</h1>
+    <p style="text-align:center;">Khám phá tính cách của bạn qua những câu hỏi thú vị. Chỉ mất vài phút!</p>
+
+    <div id="progressBar"><div id="progressFill"></div></div>
+    <div id="questions"></div>
+    <div style="text-align:center;">
+      <button id="submitBtn">🎯 Xem kết quả</button>
+    </div>
+
+    <div id="resultCard">
+      <h2 id="resultTitle"></h2>
+      <p id="resultDesc"></p>
+      <button onclick="restartSurvey()">Làm lại khảo sát</button>
+    </div>
+  </div>
+
+  <!-- Firebase JS SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+    import { getFirestore, collection, addDoc, doc, updateDoc, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDKSZ90zsIYiHeahFdbL0M5HK4lzIvsBU4",
+      authDomain: "quiz-97ec7.firebaseapp.com",
+      projectId: "quiz-97ec7",
+      storageBucket: "quiz-97ec7.appspot.com",
+      messagingSenderId: "233024726562",
+      appId: "1:233024726562:web:26e86b04d2481451588c7b"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const questions = [
+      { question: "Bạn thích làm gì vào cuối tuần?", options: [ { type:"A", text:"Đọc sách" }, { type:"B", text:"Chơi thể thao" }, { type:"C", text:"Đi dạo ngoài trời" }, { type:"D", text:"Vẽ hoặc nghe nhạc" } ] },
+      { question: "Màu sắc bạn thích nhất?", options: [ { type:"A", text:"Xanh dương" }, { type:"B", text:"Đỏ" }, { type:"C", text:"Xanh lá" }, { type:"D", text:"Vàng" } ] },
+      { question: "Bạn thường được bạn bè nhận xét là?", options: [ { type:"A", text:"Trầm tính" }, { type:"B", text:"Hoạt bát" }, { type:"C", text:"Thoải mái" }, { type:"D", text:"Sáng tạo" } ] },
+      { question: "Bạn muốn đi du lịch ở đâu?", options: [ { type:"A", text:"Thư viện lớn" }, { type:"B", text:"Sân vận động" }, { type:"C", text:"Rừng núi" }, { type:"D", text:"Phố nghệ thuật" } ] },
+    ];
+
+    const personalities = {
+      A:"Bạn là người thích tìm tòi, ham học hỏi và sống nội tâm.",
+      B:"Bạn năng động, thích vận động và giao tiếp xã hội.",
+      C:"Bạn yêu thiên nhiên, ưa khám phá và tự do.",
+      D:"Bạn sáng tạo, lạc quan và thích nghệ thuật."
+    };
+
+    let answers = {};
+    const questionsDiv = document.getElementById('questions');
+    const progressFill = document.getElementById('progressFill');
+    const submitBtn = document.getElementById('submitBtn');
+    const resultCard = document.getElementById('resultCard');
+    const resultTitle = document.getElementById('resultTitle');
+    const resultDesc = document.getElementById('resultDesc');
+
+    function renderQuestions() {
+      questionsDiv.innerHTML = '';
+      questions.forEach((q, idx) => {
+        const qDiv = document.createElement('div');
+        qDiv.className = 'question-card';
+        qDiv.innerHTML = `<h3>${idx+1}. ${q.question}</h3>`;
+        const optionsDiv = document.createElement('div');
+        optionsDiv.className = 'options';
+        q.options.forEach(o => {
+          const btn = document.createElement('button');
+          btn.innerText = o.text;
+          btn.onclick = () => selectOption(idx, o);
+          if(answers[idx]?.type === o.type) btn.classList.add('selected');
+          optionsDiv.appendChild(btn);
+        });
+        qDiv.appendChild(optionsDiv);
+        questionsDiv.appendChild(qDiv);
+      });
+      updateProgress();
+    }
+
+    function selectOption(qIdx, option) {
+      answers[qIdx] = option;
+      renderQuestions();
+    }
+
+    function updateProgress() {
+      const prog = Object.keys(answers).length / questions.length * 100;
+      progressFill.style.width = prog + '%';
+    }
+
+    async function saveSurveyResult(answers, topType) {
+      try {
+        const answersArray = questions.map((q, idx) => ({
+          question: q.question,
+          selected: answers[idx],
+        }));
+        await addDoc(collection(db, "surveyResponses"), {
+          answers: answersArray,
+          result: topType,
+          createdAt: serverTimestamp(),
+        });
+
+        const totalsRef = doc(db, "surveyStats", "totals");
+        await updateDoc(totalsRef, { [topType]: increment(1) });
+      } catch(err) {
+        console.error("Error saving response:", err);
+      }
+    }
+
+    function submitSurvey() {
+      if(Object.keys(answers).length < questions.length) {
+        alert("Vui lòng trả lời tất cả câu hỏi!");
+        return;
+      }
+      const counts = {};
+      Object.values(answers).forEach(o => {
+        counts[o.type] = (counts[o.type] || 0) + 1;
+      });
+      const topType = Object.keys(counts).reduce((a,b) => counts[a]>counts[b]?a:b);
+      resultTitle.innerText = `Tính cách của bạn: Nhóm ${topType}`;
+      resultDesc.innerText = personalities[topType];
+      resultCard.style.display = 'block';
+      window.scrollTo({top:0, behavior:'smooth'});
+      saveSurveyResult(answers, topType);
+    }
+
+    function restartSurvey() {
+      answers = {};
+      resultCard.style.display = 'none';
+      renderQuestions();
+    }
+
+    submitBtn.onclick = submitSurvey;
+    renderQuestions();
+  </script>
+</body>
+</html>
